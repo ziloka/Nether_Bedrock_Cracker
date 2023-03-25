@@ -285,7 +285,6 @@ dependencies = [
  "kas",
  "lazy_static",
  "next_long_reverser",
- "num_cpus",
  "regex",
 ]
 

@@ -244,8 +244,6 @@ pub fn search_bedrock_pattern(blocks: &mut [Block], thread_count: u64) -> Receiv
     let (tx, rx) = mpsc::channel();
     let checks = create_filter_tree(blocks, &tx);
 
-    let thread_count = u64::from(thread_count);
-
     for thread in 0..thread_count {
         let mut start_bits = (thread * (1 << 36)) / thread_count;
         let mut end_bits = ((thread + 1) * (1 << 36)) / thread_count;

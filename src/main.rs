@@ -1,7 +1,7 @@
 // https://github.com/kas-gui/kas/blob/c29c3bf59b8ce32bc1c753873f99d0ad9407a690/examples/layout.rs
 // https://kas-gui.github.io/tutorials/counter.html
 // https://github.com/kas-gui/kas/blob/c29c3bf59b8ce32bc1c753873f99d0ad9407a690/examples/counter.rs
-
+// https://github.com/kas-gui/kas/blob/c29c3bf59b8ce32bc1c753873f99d0ad9407a690/examples/async-event.rs
 use std::time::Instant;
 
 use kas::widgets::StringLabel;
@@ -17,8 +17,7 @@ use kas::{
 };
 
 use bedrock_cracker::{
-    search_bedrock_pattern, world_seeds_from_bedrock_seed, Block,
-    BlockType::BEDROCK,
+    search_bedrock_pattern, world_seeds_from_bedrock_seed, Block, BlockType::BEDROCK,
 };
 
 lazy_static! {
@@ -36,11 +35,10 @@ impl_scope! {
     }]
 
     #[derive(Debug)]
-    #[impl_default]
-    struct Cracker {
+    struct NetherBedRockCracker {
         core: widget_core!(),
         #[widget] display: EditBox,
-        #[widget] response: StringLabel
+        #[widget] response: StringLabel,
     }
 
     impl Self {
@@ -48,7 +46,7 @@ impl_scope! {
             Self {
                 core: Default::default(),
                 display: EditBox::new("Place the position of bedrock located at y = 4 in \"x y z\" on each line").with_multi_line(true),
-                response: StringLabel::new("...".into())
+                response: StringLabel::new("....".to_string()),
             }
         }
     }
@@ -60,7 +58,7 @@ impl_scope! {
             if let Some(Submit) = mgr.try_pop() {
                 // read the data
                 let contents = self.display.get_str();
-                
+
                 // ensure data is in the correct format
                 if !POSITIONS_REGEX.is_match(&contents) {
                     *mgr |= self.response.set_string("Invalid input".into());
@@ -81,24 +79,44 @@ impl_scope! {
                 }
 
                 let start = Instant::now();
-                
+
                 // start cracking
                 let mut response = String::from("Starting Cracking");
                 *mgr |= self.response.set_string(response.clone());
 
-                let rx = search_bedrock_pattern(&mut blocks, num_cpus::get() as u64);
-                for seed in rx {
-                    let world_seeds = world_seeds_from_bedrock_seed(seed, true);
-                    for world_seed in world_seeds {
-                        response.push_str(format!("Found World seed: {world_seed}\n").as_str());
-                        *mgr |= self.response.set_string(response.clone());
-                        // println!();
+                let (sender, receiver) = std::sync::mpsc::channel::<String>();
+                let rx = search_bedrock_pattern(&mut blocks, 16);
+
+                mgr.push_spawn(self.id(), async move {
+                    for seed in rx {
+                        let world_seeds = world_seeds_from_bedrock_seed(seed, true);
+                        for world_seed in world_seeds {
+                            sender.send(format!("Found World seed: {world_seed}\n"));
+                        }
+                    }
+                });
+
+                 loop {
+                    match receiver.try_recv() {
+                        Ok(message) => {
+                            response.push_str(message.as_str());
+                            *mgr |= self.response.set_string(response.clone());
+                        },
+                        Err(err) => {
+                            match err {
+                                std::sync::mpsc::TryRecvError::Empty => {
+                                    // break
+                                },
+                                std::sync::mpsc::TryRecvError::Disconnected => {
+                                    let execution_time = start.elapsed().as_secs();
+                                    response.push_str(format!("Time elapsed: {execution_time}s").as_str());
+                                    *mgr |= self.response.set_string(response.clone());
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
-
-                let execution_time = start.elapsed().as_secs();
-                response.push_str(format!("Time elapsed: {execution_time}s").as_str());
-                *mgr |= self.response.set_string(response.clone());
             }
         }
     }
@@ -109,8 +127,7 @@ impl_scope! {
 }
 
 fn main() -> kas::shell::Result<()> {
-    let theme = kas::theme::FlatTheme::new();
-    kas::shell::DefaultShell::new(theme)?
-        .with(Cracker::new())?
+    kas::shell::DefaultShell::new(kas::theme::FlatTheme::new())?
+        .with(NetherBedRockCracker::new())?
         .run()
 }
