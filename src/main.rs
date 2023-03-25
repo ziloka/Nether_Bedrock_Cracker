@@ -1,7 +1,10 @@
 // https://github.com/emilk/egui/blob/master/examples/hello_world/src/main.rs
 // https://github.com/emilk/egui/issues/110
 
-use std::{time::Instant, sync::{Mutex, Arc}};
+use std::{
+    sync::mpsc::{Receiver, Sender},
+    time::Instant,
+};
 
 use eframe::egui;
 
@@ -30,13 +33,23 @@ fn main() -> Result<(), eframe::Error> {
 struct MyApp {
     contents: String,
     response: String,
+    cracker_tx: Sender<Message>,
+    cracker_rx: Receiver<Message>,
+}
+enum Message {
+    Start(String),
+    Regular(String),
+    Disconnect(String),
 }
 
 impl Default for MyApp {
     fn default() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<Message>();
         Self {
             contents: "Contents".to_owned(),
             response: "".to_owned(),
+            cracker_tx: tx,
+            cracker_rx: rx,
         }
     }
 }
@@ -67,22 +80,36 @@ impl eframe::App for MyApp {
                     }
                 }
 
-                let start = Instant::now();
-                let rx = search_bedrock_pattern(&mut blocks, num_cpus::get() as u64);
+                let sender = self.cracker_tx.clone();
+                std::thread::spawn(move || {
+                    let start = Instant::now();
+                    let rx = search_bedrock_pattern(&mut blocks, num_cpus::get() as u64);
 
-                self.response = String::from("Started Cracking");
+                    sender.send(Message::Start("Started Cracking\n".to_string()));
 
-                for seed in rx {
-                    let world_seeds = world_seeds_from_bedrock_seed(seed, true);
-                    for world_seed in world_seeds {
-                        self.response
-                            .push_str(format!("Found World seed: {world_seed}\n").as_str());
+                    for seed in rx {
+                        let world_seeds = world_seeds_from_bedrock_seed(seed, true);
+                        for world_seed in world_seeds {
+                            sender.send(Message::Regular(format!(
+                                "Found World seed: {world_seed}\n"
+                            )));
+                        }
                     }
-                }
-                let execution_time = start.elapsed().as_secs();
-                self.response
-                    .push_str(format!("Time elapsed: {execution_time}s").as_str());
+                    let execution_time = start.elapsed().as_secs();
+                    sender.send(Message::Disconnect(format!(
+                        "Time elapsed: {execution_time}s"
+                    )));
+                });
             }
+
+            if let Ok(message) = self.cracker_rx.try_recv() {
+                match message {
+                    Message::Start(message) => self.response = message,
+                    Message::Regular(message) => self.response += message.as_str(),
+                    Message::Disconnect(message) => self.response += message.as_str(),
+                }
+            }
+
             ui.label(self.response.as_str());
         });
     }
