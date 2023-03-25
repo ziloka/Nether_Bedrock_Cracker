@@ -13,3 +13,6 @@ opt-level = 3
 next_long_reverser = "0.1.0"
 java_random = "0.1.7"
 num_cpus = "1.0"
+regex = "1.7.3"
+lazy_static = "1.4.0"
+kas = { version = "0.13.0", features = ["minimal"] }

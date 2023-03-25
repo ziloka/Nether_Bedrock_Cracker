@@ -1,42 +1,116 @@
+// https://github.com/kas-gui/kas/blob/c29c3bf59b8ce32bc1c753873f99d0ad9407a690/examples/layout.rs
+// https://kas-gui.github.io/tutorials/counter.html
+// https://github.com/kas-gui/kas/blob/c29c3bf59b8ce32bc1c753873f99d0ad9407a690/examples/counter.rs
+
 use std::time::Instant;
 
-#[allow(unused_imports)]
-use bedrock_cracker::{
-    search_bedrock_pattern, world_seeds_from_bedrock_seed, Block,
-    BlockType::{BEDROCK, OTHER},
+use kas::widgets::StringLabel;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+use kas::prelude::*;
+use kas::{
+    impl_scope,
+    prelude::EventMgr,
+    widgets::{EditBox, TextButton},
+    Widget,
 };
 
-fn main() {
-    let start = Instant::now();
+use bedrock_cracker::{
+    search_bedrock_pattern, world_seeds_from_bedrock_seed, Block,
+    BlockType::BEDROCK,
+};
 
-    let filepath = std::env::args().nth(1).expect("no filepath given");
+lazy_static! {
+    // the middle digit should never be negative
+    // ^(\n?[-\d]+\s\d\s[-\d]+)+$ regex to match positions
+    static ref POSITIONS_REGEX: Regex = Regex::new(r#"^([-\d]+\s\d\s[-\d]+\n?)+$"#).unwrap();
+}
 
-    
-    let contents = std::fs::read_to_string(filepath);
-    match contents {
-        Ok(contents) => {
-            let mut blocks: Vec<Block> = Vec::new();
-            for position in contents.split("\n") {
-                let mut position = position.split(" ");
-                let x = position.next().unwrap().parse::<i32>().unwrap();
-                let y = position.next().unwrap().parse::<i32>().unwrap();
-                let z = position.next().unwrap().parse::<i32>().unwrap();
-                blocks.push(Block::new(x, y, z, BEDROCK));
-            }
+#[derive(Clone, Debug)]
+struct Submit;
 
-            let rx = search_bedrock_pattern(&mut blocks, num_cpus::get() as u64);
+impl_scope! {
+    #[widget{
+        layout = list(down): ["Nether Bedrock Cracker", self.display, TextButton::new_msg("Submit", Submit), self.response];
+    }]
 
-            println!("Started Cracking");
-
-            for seed in rx {
-                let world_seeds = world_seeds_from_bedrock_seed(seed, true);
-                for world_seed in world_seeds {
-                    println!("Found World seed: {world_seed}");
-                }
-            }
-            let execution_time = start.elapsed().as_secs();
-            println!("Time elapsed: {execution_time}s");
-        }
-        Err(e) => println!("Could nto read file: {e}"),
+    #[derive(Debug)]
+    #[impl_default]
+    struct Cracker {
+        core: widget_core!(),
+        #[widget] display: EditBox,
+        #[widget] response: StringLabel
     }
+
+    impl Self {
+        fn new() -> Self {
+            Self {
+                core: Default::default(),
+                display: EditBox::new("Place the position of bedrock located at y = 4 in \"x y z\" on each line").with_multi_line(true),
+                response: StringLabel::new("...".into())
+            }
+        }
+    }
+
+    // `impl Self` is equivalent to `impl Counter` here.
+    // It's more useful when the type has generic parameters!
+    impl Widget for Self {
+        fn handle_message(&mut self, mgr: &mut EventMgr) {
+            if let Some(Submit) = mgr.try_pop() {
+                // read the data
+                let contents = self.display.get_str();
+                
+                // ensure data is in the correct format
+                if !POSITIONS_REGEX.is_match(&contents) {
+                    *mgr |= self.response.set_string("Invalid input".into());
+                    return;
+                }
+
+                // parse data
+                let mut blocks: Vec<Block> = Vec::new();
+                for position in contents.split("\n") {
+                    // println!("{}", position);
+                    if position.len() != 0 {
+                        let mut position = position.split(" ");
+                        let x = position.next().unwrap().parse::<i32>().unwrap();
+                        let y = position.next().unwrap().parse::<i32>().unwrap();
+                        let z = position.next().unwrap().parse::<i32>().unwrap();
+                        blocks.push(Block::new(x, y, z, BEDROCK));
+                    }
+                }
+
+                let start = Instant::now();
+                
+                // start cracking
+                let mut response = String::from("Starting Cracking");
+                *mgr |= self.response.set_string(response.clone());
+
+                let rx = search_bedrock_pattern(&mut blocks, num_cpus::get() as u64);
+                for seed in rx {
+                    let world_seeds = world_seeds_from_bedrock_seed(seed, true);
+                    for world_seed in world_seeds {
+                        response.push_str(format!("Found World seed: {world_seed}\n").as_str());
+                        *mgr |= self.response.set_string(response.clone());
+                        // println!();
+                    }
+                }
+
+                let execution_time = start.elapsed().as_secs();
+                response.push_str(format!("Time elapsed: {execution_time}s").as_str());
+                *mgr |= self.response.set_string(response.clone());
+            }
+        }
+    }
+
+    impl Window for Self {
+        fn title(&self) -> &str { "Nether Bedrock Cracker" }
+    }
+}
+
+fn main() -> kas::shell::Result<()> {
+    let theme = kas::theme::FlatTheme::new();
+    kas::shell::DefaultShell::new(theme)?
+        .with(Cracker::new())?
+        .run()
 }
