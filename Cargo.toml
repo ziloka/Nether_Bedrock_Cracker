@@ -13,3 +13,11 @@ opt-level = 3
 next_long_reverser = "0.1.0"
 java_random = "0.1.7"
 num_cpus = "1.0"
+macroquad = "0.3.25"
+
+[profile.release]
+strip = true
+opt-level = "z" 
+lto = true
+codegen-units = 1
+panic = "abort"
